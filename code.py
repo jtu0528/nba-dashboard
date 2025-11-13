@@ -391,13 +391,23 @@ if selected_player_name and season_input:
             
             # --- 第一行 metrics (混合 st.metric 和 st.markdown) ---
             
-            # (修改) 球隊 - 改用 st.markdown 以顯示全名
-            team_city = info.get('TEAM_CITY', '') 
-            team_name = info.get('TEAM_NAME', 'N/A') 
+            # (FIX) 球隊 - 改用 report_data['team_full'] 以顯示 *該賽季* 的球隊
+            # report_data 已經處理好 'TOT' (效力多隊) 或單一球隊縮寫 (MIA)
+            team_display = report_data.get('team_full', 'N/A')
+            # 如果 team_full 是縮寫 (例如 'MIA')，而 info_df 剛好是同隊，我們可以用全名
+            current_team_abbr = info.get('TEAM_ABBREVIATION', 'N/A')
+            
+            if team_display == current_team_abbr:
+                # 該賽季的球隊 == 現役球隊，使用 info_df 的完整名稱
+                team_city = info.get('TEAM_CITY', '') 
+                team_name = info.get('TEAM_NAME', 'N/A')
+                team_display = f"{team_city} {team_name}"
+            # 否則, team_display 保持 "MIA" 或 "效力多隊: ..."
+            
             with col1:
                 st.markdown("**球隊**")
                 # 使用 st.markdown 讓文字可以自動換行
-                st.markdown(f"<p style='font-size: 1.25rem; font-weight: 600; line-height: 1.4;'>{team_city} {team_name}</p>", unsafe_allow_html=True)
+                st.markdown(f"<p style='font-size: 1.25rem; font-weight: 600; line-height: 1.4;'>{team_display}</p>", unsafe_allow_html=True)
 
             position = info.get('POSITION', 'N/A')
             col2.metric("位置", position) # (不變)
@@ -412,11 +422,23 @@ if selected_player_name and season_input:
                 col4.metric("體重", "N/A")
 
             # --- 第二行 metrics (混合 st.metric 和 st.markdown) ---
+            
+            # (FIX) 球衣號碼 - 增加邏輯判斷是否為歷史賽季
             jersey = info.get('JERSEY')
+            season_team_abbr = report_data.get('team_abbr', 'N/A') # e.g., "MIA" or "MIA, BKN"
+            
+            jersey_display = "N/A"
             if jersey:
-                col1.metric("球衣號碼", f"#{jersey}") # (不變)
-            else:
-                col1.metric("球衣號碼", "N/A")
+                # 檢查是否為單一球隊的歷史賽季
+                # current_team_abbr 來自 info (LAL), season_team_abbr 來自 report (MIA)
+                if current_team_abbr != season_team_abbr and "," not in season_team_abbr:
+                     jersey_display = "N/A (歷史賽季)" # API 無法獲取歷史背號
+                else:
+                    # 顯示當前背號 (適用於現役球隊或 'TOT' 情況)
+                    jersey_display = f"#{jersey}"
+
+            with col1:
+                 st.metric("球衣號碼", jersey_display)
 
             birthdate = info.get('BIRTHDATE') 
             if birthdate:
