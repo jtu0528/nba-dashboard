@@ -328,8 +328,34 @@ selected_player_name = st.sidebar.selectbox(
     placeholder="例如: LeBron James"
 )
 
-# 賽季輸入 (來自球探報告)
-season_input = st.sidebar.text_input("輸入查詢賽季 (格式 YYYY-YY):", value="2023-24")
+# --- (NEW) 產生賽季列表 ---
+current_year = datetime.now().year
+# 如果當前月份超過8月 (賽季通常10月開始)，則最新賽季是 YYYY-(YY+1)
+if datetime.now().month >= 8:
+    start_year = current_year
+else:
+    start_year = current_year - 1
+
+# 產生從今年到 1979-80 的賽季列表
+seasons_list = []
+for year in range(start_year, 1979, -1):
+    next_year_short = str(year + 1)[-2:]
+    season_str = f"{year}-{next_year_short}"
+    seasons_list.append(season_str)
+
+# 預設選中的賽季 (例如 "2023-24")
+default_season = "2023-24"
+# 確保預設值在列表中，如果不在 (例如剛換年)，就用最新的
+default_index = 0 # 預設為最新賽季
+if default_season in seasons_list:
+    default_index = seasons_list.index(default_season)
+
+# (修改) 賽季輸入 - 改為下拉式選單，但仍可打字搜尋
+season_input = st.sidebar.selectbox(
+    "選擇或輸入查詢賽季:",
+    options=seasons_list,
+    index=default_index # 預設選中 "2023-24" 或最新的
+)
 
 # ----------------------------------
 # 4.2 主頁面 (Main Page) - 用於顯示
