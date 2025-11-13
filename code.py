@@ -361,14 +361,53 @@ if selected_player_name and season_input:
             info = info_df.iloc[0]
             
             col1, col2, col3, col4 = st.columns(4)
-            col1.metric("球隊", f"{info['TEAM_CITY']} {info['TEAM_NAME']}")
-            col2.metric("位置", info['POSITION'])
-            col3.metric("身高", info['HEIGHT'])
-            col4.metric("體重", info['WEIGHT_LBS'] + " 磅")
-            col1.metric("球衣號碼", "#" + info['JERSEY'])
-            col2.metric("生日", info['BIRTHDATE'].split('T')[0])
-            col3.metric("經驗", str(info['SCHOOL']))
-            col4.metric("選秀", f"{info['DRAFT_YEAR']} 年 第 {info['DRAFT_NUMBER']} 順位")
+# --- 第一行 metrics ---
+    team_city = info.get('TEAM_CITY', '')  
+    team_name = info.get('TEAM_NAME', 'N/A') 
+    col1.metric("球隊", f"{team_city} {team_name}")
+
+    position = info.get('POSITION', 'N/A')
+    col2.metric("位置", position)
+
+    height = info.get('HEIGHT', 'N/A')
+    col3.metric("身高", height)
+
+    weight = info.get('WEIGHT_LBS') 
+    if weight:
+        col4.metric("體重", f"{weight} 磅")
+    else:
+        col4.metric("體重", "N/A")
+
+    # --- 第二行 metrics ---
+    jersey = info.get('JERSEY')
+    if jersey:
+        col1.metric("球衣號碼", f"#{jersey}")
+    else:
+        col1.metric("球衣號碼", "N/A")
+
+    birthdate = info.get('BIRTHDATE') 
+    if birthdate:
+        date_only = birthdate.split('T')[0] 
+        col2.metric("生日", date_only)
+    else:
+        col2.metric("生日", "N/A")
+
+    school = info.get('SCHOOL', 'N/A')
+    col3.metric("經驗", str(school)) 
+
+    draft_year = info.get('DRAFT_YEAR')
+    draft_number = info.get('DRAFT_NUMBER')
+    draft_display = "N/A" 
+    if draft_year and draft_number: 
+        draft_display = f"{draft_year} 年 第 {draft_number} 順位"
+    elif draft_year: 
+        draft_display = f"{draft_year} 年"
+    col4.metric("選秀", draft_display)
+
+# (建議) 你甚至可以在第一層防護加上 else，
+# 這樣當 info_df 是 None (查無球員) 時，會顯示提示
+else:
+    st.warning("在資料庫中找不到該球員的基本資料。")
         
         # 4. 顯示「生涯數據」儀表板
         if career_df is not None:
@@ -424,4 +463,5 @@ if not games.empty:
             st.markdown(f"**{away_score} - {home_score}** ({game_status})")
         
 else:
+
     st.info("今天沒有比賽，或者 API 暫時無法連線。")
