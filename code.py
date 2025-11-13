@@ -410,7 +410,23 @@ if selected_player_name and season_input:
                 st.markdown(f"<p style='font-size: 1.25rem; font-weight: 600; line-height: 1.4;'>{team_display}</p>", unsafe_allow_html=True)
 
             position = info.get('POSITION', 'N/A')
-            col2.metric("位置", position) # (不變)
+            
+            # (NEW) 翻譯位置為中文
+            position_zh_map = {
+                'Forward': '前鋒',
+                'Guard': '後衛',
+                'Center': '中鋒',
+                'G-F': '後衛-前鋒',
+                'F-G': '前鋒-後衛',
+                'F-C': '前鋒-中鋒',
+                'C-F': '中鋒-前鋒',
+                'G': '後衛',
+                'F': '前鋒',
+                'C': '中鋒'
+            }
+            position_display = position_zh_map.get(position, position) # 如果沒對應到，顯示原文
+            
+            col2.metric("位置", position_display) # (修改) 顯示翻譯後的中文
 
             height = info.get('HEIGHT', 'N/A')
             col3.metric("身高", height) # (不變)
