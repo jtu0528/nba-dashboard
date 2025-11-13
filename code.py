@@ -389,40 +389,49 @@ if selected_player_name and season_input:
             
             col1, col2, col3, col4 = st.columns(4)
             
-            # --- 第一行 metrics ---
+            # --- 第一行 metrics (混合 st.metric 和 st.markdown) ---
+            
+            # (修改) 球隊 - 改用 st.markdown 以顯示全名
             team_city = info.get('TEAM_CITY', '') 
             team_name = info.get('TEAM_NAME', 'N/A') 
-            col1.metric("球隊", f"{team_city} {team_name}")
+            with col1:
+                st.markdown("**球隊**")
+                # 使用 st.markdown 讓文字可以自動換行
+                st.markdown(f"<p style='font-size: 1.25rem; font-weight: 600; line-height: 1.4;'>{team_city} {team_name}</p>", unsafe_allow_html=True)
 
             position = info.get('POSITION', 'N/A')
-            col2.metric("位置", position)
+            col2.metric("位置", position) # (不變)
 
             height = info.get('HEIGHT', 'N/A')
-            col3.metric("身高", height)
+            col3.metric("身高", height) # (不變)
 
             weight = info.get('WEIGHT_LBS') 
             if weight:
-                col4.metric("體重", f"{weight} 磅")
+                col4.metric("體重", f"{weight} 磅") # (不變)
             else:
                 col4.metric("體重", "N/A")
 
-            # --- 第二行 metrics ---
+            # --- 第二行 metrics (混合 st.metric 和 st.markdown) ---
             jersey = info.get('JERSEY')
             if jersey:
-                col1.metric("球衣號碼", f"#{jersey}")
+                col1.metric("球衣號碼", f"#{jersey}") # (不變)
             else:
                 col1.metric("球衣號碼", "N/A")
 
             birthdate = info.get('BIRTHDATE') 
             if birthdate:
                 date_only = birthdate.split('T')[0] 
-                col2.metric("生日", date_only)
+                col2.metric("生日", date_only) # (不變)
             else:
                 col2.metric("生日", "N/A")
 
+            # (修改) 經驗 - 改用 st.markdown
             school = info.get('SCHOOL', 'N/A')
-            col3.metric("經驗", str(school)) 
+            with col3:
+                st.markdown("**經驗**")
+                st.markdown(f"<p style='font-size: 1.25rem; font-weight: 600; line-height: 1.4;'>{str(school)}</p>", unsafe_allow_html=True)
             
+            # (修改) 選秀 - 改用 st.markdown
             draft_year = info.get('DRAFT_YEAR')
             draft_number = info.get('DRAFT_NUMBER')
             draft_display = "N/A" 
@@ -430,7 +439,10 @@ if selected_player_name and season_input:
                 draft_display = f"{draft_year} 年 第 {draft_number} 順位"
             elif draft_year: 
                 draft_display = f"{draft_year} 年"
-            col4.metric("選秀", draft_display)
+            
+            with col4:
+                st.markdown("**選秀**")
+                st.markdown(f"<p style='font-size: 1.25rem; font-weight: 600; line-height: 1.4;'>{draft_display}</p>", unsafe_allow_html=True)
 
         # (建議) 你甚至可以在第一層防護加上 else，
         # 這樣當 info_df 是 None (查無球員) 時，會顯示提示
