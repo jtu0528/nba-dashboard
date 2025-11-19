@@ -304,6 +304,9 @@ def format_report_markdown_streamlit(data):
     if not awards_list_md:
         awards_list_md = "* 暫無官方 NBA 獎項記錄"
 
+    # (FIX) 定義變數來儲存 LaTeX 符號，避免 f-string 中的反斜線導致 SyntaxError
+    delta_sym = "$\\Delta$"
+
     markdown_text = f"""
 ## ⚡ {data['name']} ({data['team_abbr']}) 球探分析報告
 **當賽季效力球隊:** **{data['team_full']}**
@@ -320,5 +323,306 @@ def format_report_markdown_streamlit(data):
 
 **📈 {data['season']} 賽季表現 & 生涯趨勢分析:**
 * **趨勢狀態:** {trend['trend_status']}
-* **得分差異 (PTS $\\Delta$):** {trend['delta_pts']} (vs. 生涯平均)
-* **籃
+* **得分差異 (PTS {delta_sym}):** {trend['delta_pts']} (vs. 生涯平均)
+* **籃板差異 (REB {delta_sym}):** {trend['delta_reb']}
+* **助攻差異 (AST {delta_sym}):** {trend['delta_ast']}
+* **投籃效率差異 (FG% {delta_sym}):** {trend['delta_fg_pct']} 
+
+---
+
+**📊 {data['season']} 賽季平均數據:**
+* 場均上場時間 (MIN): **{data['min_per_game']}**
+* 場均得分 (PTS): **{data['pts']}**
+* 場均籃板 (REB): **{data['reb']}**
+* 場均助攻 (AST): **{data['ast']}**
+* 助攻失誤比 (A/TO): **{data['ato_ratio']}**
+* 投籃命中率 (FG%): **{data['fg_pct']}%**
+* 罰球命中率 (FT%): **{data['ft_pct']}%**
+
+---
+
+**🏆 曾經得過的官方獎項 (含年份):**
+{awards_list_md}
+"""
+    return markdown_text
+
+# ======================================
+# 4. Streamlit 界面邏輯 (UI)
+# ======================================
+
+# ----------------------------------
+# 4.1 側邊欄 (Sidebar) - 輸入區
+# ----------------------------------
+st.sidebar.title("🏀 NBA 數據查詢")
+st.sidebar.header("1. 篩選與查詢")
+
+# (NEW) 1. 獲取球隊資料並製作下拉選單
+team_df = get_nba_teams_list()
+team_options = ["所有球員 (含歷史名將)"] + team_df['zh_name'].tolist()
+
+selected_team_label = st.sidebar.selectbox(
+    "篩選球隊 (選填):",
+    options=team_options,
+    index=0
+)
+
+# (NEW) 2. 根據選取的球隊，決定顯示哪些球員
+if selected_team_label == "所有球員 (含歷史名將)":
+    # 如果選「所有」，顯示原本的靜態完整名單 (含退役)
+    player_df = get_all_players_static()
+else:
+    # 如果選特定球隊，找出 Team ID 並從現役名單中篩選
+    try:
+        # 從中文名稱反查 ID
+        selected_team_id = team_df[team_df['zh_name'] == selected_team_label].iloc[0]['id']
+        
+        # 獲取所有現役球員
+        active_players_df = get_active_players_dataset()
+        
+        if not active_players_df.empty:
+            # 根據 TEAM_ID 篩選
+            filtered_players = active_players_df[active_players_df['TEAM_ID'] == selected_team_id]
+            
+            # 整理格式以符合下拉選單需求
+            player_df = pd.DataFrame({
+                '姓名': filtered_players['DISPLAY_FIRST_LAST'],
+                '球員ID': filtered_players['PERSON_ID']
+            })
+        else:
+            st.sidebar.warning("無法獲取現役名單，顯示所有球員。")
+            player_df = get_all_players_static()
+            
+    except Exception:
+        st.sidebar.error("篩選球隊時發生錯誤，顯示預設名單。")
+        player_df = get_all_players_static()
+
+# 3. 球員選擇選單
+selected_player_name = st.sidebar.selectbox(
+    "選擇或輸入球員姓名:",
+    options=player_df['姓名'],
+    index=None,
+    placeholder="例如: LeBron James"
+)
+
+# 4. 賽季選擇
+current_year = datetime.now().year
+if datetime.now().month >= 8:
+    start_year = current_year
+else:
+    start_year = current_year - 1
+
+seasons_list = []
+for year in range(start_year, 1979, -1):
+    next_year_short = str(year + 1)[-2:]
+    season_str = f"{year}-{next_year_short}"
+    seasons_list.append(season_str)
+
+default_season = "2023-24"
+default_index = 0
+if default_season in seasons_list:
+    default_index = seasons_list.index(default_season)
+
+season_input = st.sidebar.selectbox(
+    "選擇或輸入查詢賽季:",
+    options=seasons_list,
+    index=default_index
+)
+
+# ----------------------------------
+# 4.2 主頁面 (Main Page)
+# ----------------------------------
+st.title("🏀 NBA 球員數據儀表板 (Pro)")
+
+if selected_player_name and season_input:
+    st.header(f"'{selected_player_name}' 的 {season_input} 數據", divider='rainbow')
+    
+    with st.spinner(f"正在抓取 {selected_player_name} 的 {season_input} 數據..."):
+        report_data, info_df, career_df, awards_df = get_player_data_package(selected_player_name, season_input)
+
+    tab1, tab2 = st.tabs(["📊 球探分析報告", "🗃️ 原始數據瀏覽器"])
+
+    with tab1:
+        markdown_output = format_report_markdown_streamlit(report_data)
+        st.markdown(markdown_output)
+
+    with tab2:
+        st.header("原始數據瀏覽器")
+        
+        if info_df is not None:
+            st.subheader("基本資料")
+            info = info_df.iloc[0]
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            team_display = report_data.get('team_full', 'N/A')
+            current_team_abbr = info.get('TEAM_ABBREVIATION', 'N/A')
+            
+            if team_display == current_team_abbr:
+                team_city = info.get('TEAM_CITY', '') 
+                team_name = info.get('TEAM_NAME', 'N/A')
+                team_display = f"{team_city} {team_name}"
+            
+            with col1:
+                st.markdown("**球隊**")
+                st.markdown(f"<p style='font-size: 1.25rem; font-weight: 600; line-height: 1.4;'>{team_display}</p>", unsafe_allow_html=True)
+
+            position = info.get('POSITION', 'N/A')
+            
+            position_zh_map = {
+                'Forward': '前鋒',
+                'Guard': '後衛',
+                'Center': '中鋒',
+                'G-F': '後衛-前鋒',
+                'F-G': '前鋒-後衛',
+                'F-C': '前鋒-中鋒',
+                'C-F': '中鋒-前鋒',
+                'G': '後衛',
+                'F': '前鋒',
+                'C': '中鋒'
+            }
+            position_display = position_zh_map.get(position, position)
+            
+            col2.metric("位置", position_display)
+
+            height = info.get('HEIGHT', 'N/A')
+            col3.metric("身高", height)
+
+            weight = info.get('WEIGHT_LBS') 
+            if weight:
+                col4.metric("體重", f"{weight} 磅")
+            else:
+                col4.metric("體重", "N/A")
+
+            jersey = info.get('JERSEY')
+            season_team_abbr = report_data.get('team_abbr', 'N/A')
+            
+            jersey_display = "N/A"
+            if jersey:
+                if current_team_abbr != season_team_abbr and "," not in season_team_abbr:
+                     jersey_display = "N/A (歷史賽季)"
+                else:
+                    jersey_display = f"#{jersey}"
+
+            with col1:
+                 st.metric("球衣號碼", jersey_display)
+
+            birthdate = info.get('BIRTHDATE') 
+            if birthdate:
+                date_only = birthdate.split('T')[0] 
+                col2.metric("生日", date_only)
+            else:
+                col2.metric("生日", "N/A")
+
+            school = info.get('SCHOOL', 'N/A')
+            with col3:
+                st.markdown("**經驗**")
+                st.markdown(f"<p style='font-size: 1.25rem; font-weight: 600; line-height: 1.4;'>{str(school)}</p>", unsafe_allow_html=True)
+            
+            draft_year = info.get('DRAFT_YEAR')
+            draft_number = info.get('DRAFT_NUMBER')
+            draft_display = "N/A" 
+            if draft_year and draft_number: 
+                draft_display = f"{draft_year} 年 第 {draft_number} 順位"
+            elif draft_year: 
+                draft_display = f"{draft_year} 年"
+            
+            with col4:
+                st.markdown("**選秀**")
+                st.markdown(f"<p style='font-size: 1.25rem; font-weight: 600; line-height: 1.4;'>{draft_display}</p>", unsafe_allow_html=True)
+
+        else:
+            st.warning("在資料庫中找不到該球員的基本資料。")
+        
+        if career_df is not None:
+            st.subheader("生涯逐年數據 (例行賽)")
+            
+            columns_to_show = [
+                'SEASON_ID', 'TEAM_ABBREVIATION', 'GP', 'GS', 'MIN', 'PTS', 
+                'REB', 'AST', 'STL', 'BLK', 'TOV', 'FG_PCT', 'FG3_PCT', 'FT_PCT'
+            ]
+            
+            display_cols = [col for col in columns_to_show if col in career_df.columns]
+            display_df = career_df[display_cols].copy()
+            
+            column_rename_map = {
+                'SEASON_ID': '賽季',
+                'TEAM_ABBREVIATION': '球隊',
+                'GP': '出賽',
+                'GS': '先發',
+                'MIN': '分鐘',
+                'PTS': '得分',
+                'REB': '籃板',
+                'AST': '助攻',
+                'STL': '抄截',
+                'BLK': '阻攻',
+                'TOV': '失誤',
+                'FG_PCT': '投籃%',
+                'FG3_PCT': '三分%',
+                'FT_PCT': '罰球%'
+            }
+            
+            display_df.rename(columns=column_rename_map, inplace=True)
+            
+            st.dataframe(
+                display_df.sort_values('賽季', ascending=False), 
+                height=350, 
+                use_container_width=True
+            )
+        
+        if awards_df is not None:
+            st.subheader("生涯獎項")
+            
+            awards_to_show = ['DESCRIPTION', 'SEASON', 'AWARD_TYPE']
+            awards_display_cols = [col for col in awards_to_show if col in awards_df.columns]
+            awards_display_df = awards_df[awards_display_cols].copy()
+            
+            awards_display_df.rename(columns={
+                'DESCRIPTION': '獎項名稱',
+                'SEASON': '賽季',
+                'AWARD_TYPE': '獎項類型'
+            }, inplace=True)
+            
+            st.dataframe(
+                awards_display_df, 
+                height=200, 
+                use_container_width=True
+            )
+
+else:
+    st.info("👈 請從左側的下拉式選單中選擇一位球員，並確認查詢賽季。")
+
+
+# ----------------------------------
+# 4.3 今日賽程
+# ----------------------------------
+st.header("今日賽程表 (非即時)", divider='blue')
+st.markdown("⚠️ **請注意：** 這裡的數據**不是即時的**。`nba-api` 的數據更新有嚴重延遲。")
+
+if st.button("刷新今日賽程"):
+    st.cache_data.clear()
+    st.rerun()
+
+games, line_scores = get_todays_scoreboard()
+
+if not games.empty:
+    for index, game in games.iterrows():
+        home_team_id = game['HOME_TEAM_ID']
+        away_team_id = game['VISITOR_TEAM_ID']
+        
+        home_team_score_info = line_scores[line_scores['TEAM_ID'] == home_team_id]
+        away_team_score_info = line_scores[line_scores['TEAM_ID'] == away_team_id]
+
+        if not home_team_score_info.empty and not away_team_score_info.empty:
+            home_team_abbr = home_team_score_info.iloc[0]['TEAM_ABBREVIATION']
+            away_team_abbr = away_team_score_info.iloc[0]['TEAM_ABBREVIATION']
+            
+            home_score = home_team_score_info.iloc[0].get('SCORE', 0)
+            away_score = away_team_score_info.iloc[0].get('SCORE', 0)
+            
+            game_status = game['GAME_STATUS_TEXT']
+
+            st.subheader(f"{away_team_abbr} @ {home_team_abbr}")
+            st.markdown(f"**{away_score} - {home_score}** ({game_status})")
+        
+else:
+    st.info("今天沒有比賽，或者 API 暫時無法連線。")
