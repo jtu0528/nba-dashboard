@@ -494,6 +494,7 @@ if selected_player_name and season_input:
                 col4.metric("體重", "N/A")
 
             # (FIX) 修正球衣號碼判斷邏輯
+            # NBA API 僅提供現役背號，無法查詢歷史背號
             jersey = info.get('JERSEY')
             season_team_zh = report_data.get('team_abbr', 'N/A') # 這是中文 (例如: 洛杉磯 湖人)
             current_team_abbr = info.get('TEAM_ABBREVIATION', 'N/A') # 這是英文 (例如: LAL)
@@ -501,16 +502,21 @@ if selected_player_name and season_input:
             # 將現役球隊縮寫也轉成中文，以便比較
             current_team_zh = TEAM_ABBR_TO_ZH.get(current_team_abbr, current_team_abbr)
             
-            jersey_display = "N/A"
+            jersey_display = "-"
+            jersey_help = ""
+
             if jersey:
                 # 比較兩邊的中文名稱
                 if current_team_zh != season_team_zh:
-                     jersey_display = "N/A (歷史賽季)"
+                     # 如果是歷史賽季 (球隊不同)，不顯示背號，以免誤導 (例如熱火時期顯示 #23)
+                     jersey_display = "-"
+                     jersey_help = "⚠️ 資料源限制：API 僅提供球員「當前」效力球隊的背號，無法獲取歷史賽季的背號資訊。"
                 else:
+                    # 球隊相同 (現役或同隊歷史)，顯示背號
                     jersey_display = f"#{jersey}"
 
             with col1:
-                 st.metric("球衣號碼", jersey_display)
+                 st.metric("球衣號碼", jersey_display, help=jersey_help)
 
             birthdate = info.get('BIRTHDATE') 
             if birthdate:
