@@ -1,37 +1,51 @@
 # -----------------------------------------------------------------
 # NBA 球員數據儀表板 (Streamlit App)
 # 結合「球探分析報告」與「原始數據瀏覽器」
-# (欄位已中文化)
+# (欄位已中文化 + 新增球隊篩選功能)
 # -----------------------------------------------------------------
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-from nba_api.stats.static import players
+from nba_api.stats.static import players, teams # (NEW) 新增 teams
 from nba_api.stats.endpoints import (
     commonplayerinfo,
     playercareerstats,
     playerawards,
-    scoreboardv2  # 用於獲取「今日賽程」
+    scoreboardv2,  # 用於獲取「今日賽程」
+    commonallplayers # (NEW) 用於獲取分隊球員名單
 )
 
 # ====================================================================
-# 1. 頁面設定
+# 0. 全域變數與設定
 # ====================================================================
 st.set_page_config(
     page_title="NBA 球員數據儀表板 (Pro)",
     page_icon="🏀",
-    layout="wide"  # 寬版面更適合儀表板
+    layout="wide"
 )
 
+# (NEW) 將球隊中文對照表提取為全域常數，供多處使用
+TEAM_ABBR_TO_ZH = {
+    'ATL': '亞特蘭大 老鷹', 'BOS': '波士頓 賽爾提克', 'BKN': '布魯克林 籃網', 'CHA': '夏洛特 黃蜂', 
+    'CHI': '芝加哥 公牛', 'CLE': '克里夫蘭 騎士', 'DAL': '達拉斯 獨行俠', 'DEN': '丹佛 金塊', 
+    'DET': '底特律 活塞', 'GSW': '金州 勇士', 'HOU': '休士頓 火箭', 'IND': '印第安納 溜馬', 
+    'LAC': '洛杉磯 快艇', 'LAL': '洛杉磯 湖人', 'MEM': '曼菲斯 灰熊', 'MIA': '邁阿密 熱火', 
+    'MIL': '密爾瓦基 公鹿', 'MIN': '明尼蘇達 灰狼', 'NOP': '紐奧良 鵜鶘', 'NYK': '紐約 尼克', 
+    'OKC': '奧克拉荷馬雷霆', 'ORL': '奧蘭多 魔術', 'PHI': '費城 76人', 'PHX': '鳳凰城 太陽', 
+    'POR': '波特蘭 拓荒者', 'SAC': '沙加緬度 國王', 'SAS': '聖安東尼奧 馬刺', 'TOR': '多倫多 暴龍', 
+    'UTA': '猶他 爵士', 'WAS': '華盛頓 巫師',
+    'TOT': '多隊'
+}
+
 # ====================================================================
-# 2. 數據獲取與處理的核心邏輯 (合併版)
+# 2. 數據獲取與處理的核心邏輯
 # ====================================================================
 
 # --- 來自「球探報告」的輔助函式 ---
 
 @st.cache_data
 def get_player_id(player_name):
-    """根據球員姓名查找其唯一的 Player ID (使用 Streamlit 緩存)"""
+    """根據球員姓名查找其唯一的 Player ID"""
     try:
         nba_players = players.get_players()
         player_info = [
@@ -42,7 +56,7 @@ def get_player_id(player_name):
     except Exception:
         return None
 
-def get_precise_positions(generic_position):
+def get_precise_positions(generic_position, translate_to_zh=False):
     """將 NBA API 返回的通用位置轉換為所有精確位置。"""
     position_map = {
         'Guard': ['PG', 'SG'], 'Forward': ['SF', 'PF'], 'Center': ['C'],
@@ -50,8 +64,25 @@ def get_precise_positions(generic_position):
         'C-F': ['PF', 'C', 'SF'], 'G': ['PG', 'SG'], 'F': ['SF', 'PF'], 'C': ['C'],
     }
     positions = position_map.get(generic_position)
+    
     if positions:
+        if translate_to_zh:
+            zh_map = {
+                'PG': '控球後衛', 'SG': '得分後衛', 'SF': '小前鋒', 
+                'PF': '大前鋒', 'C': '中鋒'
+            }
+            translated_positions = [zh_map.get(p, p) for p in positions]
+            return ", ".join(translated_positions)
         return ", ".join(positions)
+
+    if translate_to_zh:
+        zh_generic_map = {
+            'Forward': '前鋒', 'Guard': '後衛', 'Center': '中鋒',
+            'G-F': '後衛-前鋒', 'F-G': '前鋒-後衛', 'F-C': '前鋒-中鋒',
+            'C-F': '中鋒-前鋒', 'G': '後衛', 'F': '前鋒', 'C': '中鋒'
+        }
+        return zh_generic_map.get(generic_position, generic_position)
+        
     return generic_position
 
 def analyze_style(stats, position):
@@ -87,17 +118,36 @@ def analyze_style(stats, position):
 # --- 來自「儀表板」的輔助函式 ---
 
 @st.cache_data
-def get_players_list():
-    """獲取所有 NBA 球員的列表 (姓名與 ID) - 用於下拉選單"""
+def get_all_players_static():
+    """獲取所有 NBA 球員的靜態列表 (含退役)"""
     nba_players = players.get_players()
     player_df = pd.DataFrame(nba_players)
     player_df = player_df[['full_name', 'id']]
     player_df.columns = ['姓名', '球員ID']
     return player_df
 
-@st.cache_data(ttl=300) # 緩存 5 分鐘
+@st.cache_data(ttl=3600) # 緩存 1 小時
+def get_active_players_dataset():
+    """獲取當季所有現役球員名單 (包含球隊資訊)"""
+    # is_only_current_season=1 表示只抓現役
+    try:
+        resp = commonallplayers.CommonAllPlayers(is_only_current_season=1)
+        return resp.get_data_frames()[0]
+    except Exception:
+        return pd.DataFrame()
+
+@st.cache_data
+def get_nba_teams_list():
+    """獲取 NBA 球隊列表並加上中文名稱"""
+    nba_teams = teams.get_teams()
+    df = pd.DataFrame(nba_teams)
+    # 使用全域字典 mapping 中文名稱
+    df['zh_name'] = df['abbreviation'].map(TEAM_ABBR_TO_ZH).fillna(df['full_name'])
+    return df
+
+@st.cache_data(ttl=300)
 def get_todays_scoreboard():
-    """獲取今日賽程 (非即時)"""
+    """獲取今日賽程"""
     try:
         today = datetime.now().strftime('%Y-%m-%d')
         board = scoreboardv2.ScoreboardV2(game_date=today)
@@ -108,17 +158,12 @@ def get_todays_scoreboard():
         return pd.DataFrame(), pd.DataFrame()
 
 
-# --- 【核心】修改過的「球探報告」函式 ---
-# 我們修改此函式，使其同時返回「報告字典」和「原始 DataFrames」
+# --- 【核心】球探報告函式 ---
 @st.cache_data
 def get_player_data_package(player_name, season='2023-24'):
-    """
-    獲取並整理特定球員的所有數據。
-    返回: (report_dict, info_df, career_df, awards_df)
-    """
+    """獲取並整理特定球員的所有數據。"""
     player_id = get_player_id(player_name)
     
-    # 預先定義好「錯誤時」的返回內容
     error_report = {
         'error': f"找不到球員：{player_name}。請檢查姓名是否正確。",
         'name': player_name, 'team_abbr': 'N/A', 'team_full': 'N/A', 'precise_positions': 'N/A', 
@@ -132,43 +177,41 @@ def get_player_data_package(player_name, season='2023-24'):
         return error_report, None, None, None
 
     try:
-        # 1. 獲取基本資訊 (用於儀表板 + 報告)
         info = commonplayerinfo.CommonPlayerInfo(player_id=player_id)
         info_df = info.get_data_frames()[0]
         
-        # 2. 獲取生涯數據 (用於儀表板 + 報告)
         stats = playercareerstats.PlayerCareerStats(player_id=player_id)
-        stats_data = stats.get_data_frames()[0] # 逐年
-        career_totals_df = stats.get_data_frames()[1] # 生涯總計
+        stats_data = stats.get_data_frames()[0]
+        career_totals_df = stats.get_data_frames()[1]
         season_stats = stats_data[stats_data['SEASON_ID'] == season]
         
-        # 3. 獲取獎項資訊 (用於儀表板 + 報告)
         awards = playerawards.PlayerAwards(player_id=player_id)
         awards_df = awards.get_data_frames()[0]
         
-        # --- 開始建立「報告字典」---
         report = {}
         generic_pos = info_df.loc[0, 'POSITION']
         report['name'] = info_df.loc[0, 'DISPLAY_FIRST_LAST']
         
-        # 處理球隊邏輯
+        # 使用全域 TEAM_ABBR_TO_ZH 處理球隊名稱
         if not season_stats.empty:
             team_abbr_list = season_stats['TEAM_ABBREVIATION'].tolist()
             if 'TOT' in team_abbr_list:
                 abbrs = [a for a in team_abbr_list if a != 'TOT']
-                report['team_abbr'] = ", ".join(abbrs)
-                report['team_full'] = f"效力多隊: {report['team_abbr']}"
+                zh_abbrs = [TEAM_ABBR_TO_ZH.get(a, a) for a in abbrs]
+                report['team_abbr'] = "多隊"
+                report['team_full'] = f"效力多隊: {', '.join(zh_abbrs)}"
             else:
-                report['team_abbr'] = team_abbr_list[0]
-                report['team_full'] = team_abbr_list[0]
+                abbr = team_abbr_list[0]
+                report['team_abbr'] = TEAM_ABBR_TO_ZH.get(abbr, abbr)
+                report['team_full'] = TEAM_ABBR_TO_ZH.get(abbr, abbr)
         else:
-            report['team_abbr'] = info_df.loc[0, 'TEAM_ABBREVIATION']
-            report['team_full'] = info_df.loc[0, 'TEAM_NAME'] 
+            abbr = info_df.loc[0, 'TEAM_ABBREVIATION']
+            report['team_abbr'] = TEAM_ABBR_TO_ZH.get(abbr, abbr)
+            report['team_full'] = TEAM_ABBR_TO_ZH.get(abbr, abbr) 
         
         report['position'] = generic_pos 
-        report['precise_positions'] = get_precise_positions(generic_pos) 
+        report['precise_positions'] = get_precise_positions(generic_pos, translate_to_zh=True)
         
-        # --- 場均數據計算 ---
         if not season_stats.empty and season_stats.iloc[-1]['GP'] > 0:
             avg_stats = season_stats.iloc[-1]
             total_gp = avg_stats['GP']
@@ -191,7 +234,6 @@ def get_player_data_package(player_name, season='2023-24'):
             except ZeroDivisionError:
                 report['ato_ratio'] = 'N/A'
             
-            # 生涯趨勢分析邏輯
             if not career_totals_df.empty:
                 career_avg = {}
                 total_gp_career = career_totals_df.loc[0, 'GP']
@@ -237,14 +279,12 @@ def get_player_data_package(player_name, season='2023-24'):
             })
             report['trend_analysis'] = {'trend_status': 'N/A', 'delta_pts': 'N/A', 'delta_reb': 'N/A', 'delta_ast': 'N/A', 'delta_fg_pct': 'N/A'}
 
-        # --- 獎項列表 (含年份) ---
         if not awards_df.empty:
             award_pairs = awards_df[['DESCRIPTION', 'SEASON']].apply(lambda x: f"{x['DESCRIPTION']} ({x['SEASON'][:4]})", axis=1).tolist()
             report['awards'] = award_pairs
         else:
             report['awards'] = []
 
-        # 【關鍵修改】返回報告字典和原始 DataFrames
         return report, info_df, stats_data, awards_df
 
     except Exception as e:
@@ -252,12 +292,8 @@ def get_player_data_package(player_name, season='2023-24'):
         return error_report, None, None, None
 
 
-# ======================================
-# 3. 報告格式化與輸出 (來自球探報告)
-# ======================================
-
 def format_report_markdown_streamlit(data):
-    """將整理後的數據格式化為 Markdown 報告 (Streamlit 直接渲染)"""
+    """Markdown 報告格式化"""
     if data.get('error'):
         return f"## ❌ 錯誤報告\n\n{data['error']}"
 
@@ -285,310 +321,4 @@ def format_report_markdown_streamlit(data):
 **📈 {data['season']} 賽季表現 & 生涯趨勢分析:**
 * **趨勢狀態:** {trend['trend_status']}
 * **得分差異 (PTS $\\Delta$):** {trend['delta_pts']} (vs. 生涯平均)
-* **籃板差異 (REB $\\Delta$):** {trend['delta_reb']}
-* **助攻差異 (AST $\\Delta$):** {trend['delta_ast']}
-* **投籃效率差異 (FG% $\\Delta$):** {trend['delta_fg_pct']} 
-
----
-
-**📊 {data['season']} 賽季平均數據:**
-* 場均上場時間 (MIN): **{data['min_per_game']}**
-* 場均得分 (PTS): **{data['pts']}**
-* 場均籃板 (REB): **{data['reb']}**
-* 場均助攻 (AST): **{data['ast']}**
-* 助攻失誤比 (A/TO): **{data['ato_ratio']}**
-* 投籃命中率 (FG%): **{data['fg_pct']}%**
-* 罰球命中率 (FT%): **{data['ft_pct']}%**
-
----
-
-**🏆 曾經得過的官方獎項 (含年份):**
-{awards_list_md}
-"""
-    return markdown_text
-
-# ======================================
-# 4. Streamlit 界面邏輯 (UI)
-# ======================================
-
-# ----------------------------------
-# 4.1 側邊欄 (Sidebar) - 用於輸入
-# ----------------------------------
-st.sidebar.title("🏀 NBA 數據查詢")
-st.sidebar.header("1. 查詢球員數據")
-
-# 載入球員列表 (來自儀表板)
-player_df = get_players_list()
-
-# 創建下拉式選單 (來自儀表板)
-selected_player_name = st.sidebar.selectbox(
-    "選擇或輸入球員姓名:",
-    options=player_df['姓名'],
-    index=None,  # 預設不選中任何球員
-    placeholder="例如: LeBron James"
-)
-
-# --- (NEW) 產生賽季列表 ---
-current_year = datetime.now().year
-# 如果當前月份超過8月 (賽季通常10月開始)，則最新賽季是 YYYY-(YY+1)
-if datetime.now().month >= 8:
-    start_year = current_year
-else:
-    start_year = current_year - 1
-
-# 產生從今年到 1979-80 的賽季列表
-seasons_list = []
-for year in range(start_year, 1979, -1):
-    next_year_short = str(year + 1)[-2:]
-    season_str = f"{year}-{next_year_short}"
-    seasons_list.append(season_str)
-
-# 預設選中的賽季 (例如 "2023-24")
-default_season = "2023-24"
-# 確保預設值在列表中，如果不在 (例如剛換年)，就用最新的
-default_index = 0 # 預設為最新賽季
-if default_season in seasons_list:
-    default_index = seasons_list.index(default_season)
-
-# (修改) 賽季輸入 - 改為下拉式選單，但仍可打字搜尋
-season_input = st.sidebar.selectbox(
-    "選擇或輸入查詢賽季:",
-    options=seasons_list,
-    index=default_index # 預設選中 "2023-24" 或最新的
-)
-
-# ----------------------------------
-# 4.2 主頁面 (Main Page) - 用於顯示
-# ----------------------------------
-st.title("🏀 NBA 球員數據儀表板 (Pro)")
-
-if selected_player_name and season_input:
-    # --- 如果用戶選擇了球員 ---
-    st.header(f"'{selected_player_name}' 的 {season_input} 數據", divider='rainbow')
-    
-    # 1. 【關鍵】一次性獲取所有數據
-    with st.spinner(f"正在抓取 {selected_player_name} 的 {season_input} 數據..."):
-        report_data, info_df, career_df, awards_df = get_player_data_package(selected_player_name, season_input)
-
-    # 2. 顯示「球探分析報告」
-    # (我們將報告和儀表板放在不同的分頁中，更整潔)
-    tab1, tab2 = st.tabs(["📊 球探分析報告", "🗃️ 原始數據瀏覽器"])
-
-    with tab1:
-        # 獲取 Markdown 報告
-        markdown_output = format_report_markdown_streamlit(report_data)
-        st.markdown(markdown_output)
-
-    with tab2:
-        st.header("原始數據瀏覽器")
-        
-        # 3. 顯示「基本資料」儀表板
-        if info_df is not None:
-            st.subheader("基本資料")
-            info = info_df.iloc[0]
-            
-            col1, col2, col3, col4 = st.columns(4)
-            
-            # --- 第一行 metrics (混合 st.metric 和 st.markdown) ---
-            
-            # (FIX) 球隊 - 改用 report_data['team_full'] 以顯示 *該賽季* 的球隊
-            # report_data 已經處理好 'TOT' (效力多隊) 或單一球隊縮寫 (MIA)
-            team_display = report_data.get('team_full', 'N/A')
-            # 如果 team_full 是縮寫 (例如 'MIA')，而 info_df 剛好是同隊，我們可以用全名
-            current_team_abbr = info.get('TEAM_ABBREVIATION', 'N/A')
-            
-            if team_display == current_team_abbr:
-                # 該賽季的球隊 == 現役球隊，使用 info_df 的完整名稱
-                team_city = info.get('TEAM_CITY', '') 
-                team_name = info.get('TEAM_NAME', 'N/A')
-                team_display = f"{team_city} {team_name}"
-            # 否則, team_display 保持 "MIA" 或 "效力多隊: ..."
-            
-            with col1:
-                st.markdown("**球隊**")
-                # 使用 st.markdown 讓文字可以自動換行
-                st.markdown(f"<p style='font-size: 1.25rem; font-weight: 600; line-height: 1.4;'>{team_display}</p>", unsafe_allow_html=True)
-
-            position = info.get('POSITION', 'N/A')
-            
-            # (NEW) 翻譯位置為中文
-            position_zh_map = {
-                'Forward': '前鋒',
-                'Guard': '後衛',
-                'Center': '中鋒',
-                'G-F': '後衛-前鋒',
-                'F-G': '前鋒-後衛',
-                'F-C': '前鋒-中鋒',
-                'C-F': '中鋒-前鋒',
-                'G': '後衛',
-                'F': '前鋒',
-                'C': '中鋒'
-            }
-            position_display = position_zh_map.get(position, position) # 如果沒對應到，顯示原文
-            
-            col2.metric("位置", position_display) # (修改) 顯示翻譯後的中文
-
-            height = info.get('HEIGHT', 'N/A')
-            col3.metric("身高", height) # (不變)
-
-            weight = info.get('WEIGHT_LBS') 
-            if weight:
-                col4.metric("體重", f"{weight} 磅") # (不變)
-            else:
-                col4.metric("體重", "N/A")
-
-            # --- 第二行 metrics (混合 st.metric 和 st.markdown) ---
-            
-            # (FIX) 球衣號碼 - 增加邏輯判斷是否為歷史賽季
-            jersey = info.get('JERSEY')
-            season_team_abbr = report_data.get('team_abbr', 'N/A') # e.g., "MIA" or "MIA, BKN"
-            
-            jersey_display = "N/A"
-            if jersey:
-                # 檢查是否為單一球隊的歷史賽季
-                # current_team_abbr 來自 info (LAL), season_team_abbr 來自 report (MIA)
-                if current_team_abbr != season_team_abbr and "," not in season_team_abbr:
-                     jersey_display = "N/A (歷史賽季)" # API 無法獲取歷史背號
-                else:
-                    # 顯示當前背號 (適用於現役球隊或 'TOT' 情況)
-                    jersey_display = f"#{jersey}"
-
-            with col1:
-                 st.metric("球衣號碼", jersey_display)
-
-            birthdate = info.get('BIRTHDATE') 
-            if birthdate:
-                date_only = birthdate.split('T')[0] 
-                col2.metric("生日", date_only) # (不變)
-            else:
-                col2.metric("生日", "N/A")
-
-            # (修改) 經驗 - 改用 st.markdown
-            school = info.get('SCHOOL', 'N/A')
-            with col3:
-                st.markdown("**經驗**")
-                st.markdown(f"<p style='font-size: 1.25rem; font-weight: 600; line-height: 1.4;'>{str(school)}</p>", unsafe_allow_html=True)
-            
-            # (修改) 選秀 - 改用 st.markdown
-            draft_year = info.get('DRAFT_YEAR')
-            draft_number = info.get('DRAFT_NUMBER')
-            draft_display = "N/A" 
-            if draft_year and draft_number: 
-                draft_display = f"{draft_year} 年 第 {draft_number} 順位"
-            elif draft_year: 
-                draft_display = f"{draft_year} 年"
-            
-            with col4:
-                st.markdown("**選秀**")
-                st.markdown(f"<p style='font-size: 1.25rem; font-weight: 600; line-height: 1.4;'>{draft_display}</p>", unsafe_allow_html=True)
-
-        # (建議) 你甚至可以在第一層防護加上 else，
-        # 這樣當 info_df 是 None (查無球員) 時，會顯示提示
-        else:
-            st.warning("在資料庫中找不到該球員的基本資料。")
-        
-        # 4. 顯示「生涯數據」儀表板
-        if career_df is not None:
-            st.subheader("生涯逐年數據 (例行賽)")
-            
-            # (不變) 定義要抓取的原始欄位
-            columns_to_show = [
-                'SEASON_ID', 'TEAM_ABBREVIATION', 'GP', 'GS', 'MIN', 'PTS', 
-                'REB', 'AST', 'STL', 'BLK', 'TOV', 'FG_PCT', 'FG3_PCT', 'FT_PCT'
-            ]
-            
-            # (不變) 確保這些欄位存在於 DataFrame 中
-            display_cols = [col for col in columns_to_show if col in career_df.columns]
-            
-            # (新增) 建立一個副本以便安全地修改
-            display_df = career_df[display_cols].copy()
-            
-            # (新增) 建立中文欄位名稱的對應字典
-            column_rename_map = {
-                'SEASON_ID': '賽季',
-                'TEAM_ABBREVIATION': '球隊',
-                'GP': '出賽',
-                'GS': '先發',
-                'MIN': '分鐘',
-                'PTS': '得分',
-                'REB': '籃板',
-                'AST': '助攻',
-                'STL': '抄截',
-                'BLK': '阻攻',
-                'TOV': '失誤',
-                'FG_PCT': '投籃%',
-                'FG3_PCT': '三分%',
-                'FT_PCT': '罰球%'
-            }
-            
-            # (新增) 執行改名
-            display_df.rename(columns=column_rename_map, inplace=True)
-            
-            # (修改) 顯示改名後的 DataFrame，並以中文欄位排序
-            st.dataframe(
-                display_df.sort_values('賽季', ascending=False), 
-                height=350, 
-                use_container_width=True
-            )
-        
-        # 5. 顯示「獎項」儀表板
-        if awards_df is not None:
-            st.subheader("生涯獎項")
-            
-            # (新增) 建立一個副本並改名
-            awards_to_show = ['DESCRIPTION', 'SEASON', 'AWARD_TYPE']
-            awards_display_cols = [col for col in awards_to_show if col in awards_df.columns]
-            awards_display_df = awards_df[awards_display_cols].copy()
-            
-            awards_display_df.rename(columns={
-                'DESCRIPTION': '獎項名稱',
-                'SEASON': '賽季',
-                'AWARD_TYPE': '獎項類型'
-            }, inplace=True)
-            
-            # (修改) 顯示改名後的 DataFrame
-            st.dataframe(
-                awards_display_df, 
-                height=200, 
-                use_container_width=True
-            )
-
-else:
-    # --- 如果用戶還沒選擇球員 ---
-    st.info("👈 請從左側的下拉式選單中選擇一位球員，並確認查詢賽季。")
-
-
-# ----------------------------------
-# 4.3 今日賽程 (非即時)
-# ----------------------------------
-st.header("今日賽程表 (非即時)", divider='blue')
-st.markdown("⚠️ **請注意：** 這裡的數據**不是即時的**。`nba-api` 的數據更新有嚴重延遲。")
-
-if st.button("刷新今日賽程"):
-    st.cache_data.clear() # 清除所有緩存 (包括球員)
-    st.rerun()
-
-games, line_scores = get_todays_scoreboard()
-
-if not games.empty:
-    for index, game in games.iterrows():
-        home_team_id = game['HOME_TEAM_ID']
-        away_team_id = game['VISITOR_TEAM_ID']
-        
-        home_team_score_info = line_scores[line_scores['TEAM_ID'] == home_team_id]
-        away_team_score_info = line_scores[line_scores['TEAM_ID'] == away_team_id]
-
-        if not home_team_score_info.empty and not away_team_score_info.empty:
-            home_team_abbr = home_team_score_info.iloc[0]['TEAM_ABBREVIATION']
-            away_team_abbr = away_team_score_info.iloc[0]['TEAM_ABBREVIATION']
-            
-            home_score = home_team_score_info.iloc[0].get('SCORE', 0)
-            away_score = away_team_score_info.iloc[0].get('SCORE', 0)
-            
-            game_status = game['GAME_STATUS_TEXT']
-
-            st.subheader(f"{away_team_abbr} @ {home_team_abbr}")
-            st.markdown(f"**{away_score} - {home_score}** ({game_status})")
-        
-else:
-    st.info("今天沒有比賽，或者 API 暫時無法連線。")
+* **籃
