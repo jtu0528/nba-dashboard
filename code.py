@@ -493,12 +493,18 @@ if selected_player_name and season_input:
             else:
                 col4.metric("體重", "N/A")
 
+            # (FIX) 修正球衣號碼判斷邏輯
             jersey = info.get('JERSEY')
-            season_team_abbr = report_data.get('team_abbr', 'N/A')
+            season_team_zh = report_data.get('team_abbr', 'N/A') # 這是中文 (例如: 洛杉磯 湖人)
+            current_team_abbr = info.get('TEAM_ABBREVIATION', 'N/A') # 這是英文 (例如: LAL)
+            
+            # 將現役球隊縮寫也轉成中文，以便比較
+            current_team_zh = TEAM_ABBR_TO_ZH.get(current_team_abbr, current_team_abbr)
             
             jersey_display = "N/A"
             if jersey:
-                if current_team_abbr != season_team_abbr and "," not in season_team_abbr:
+                # 比較兩邊的中文名稱
+                if current_team_zh != season_team_zh:
                      jersey_display = "N/A (歷史賽季)"
                 else:
                     jersey_display = f"#{jersey}"
