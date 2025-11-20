@@ -2,3 +2,4 @@ streamlit
 nba_api
 pandas
 requests
+plotly
