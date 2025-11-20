@@ -566,10 +566,11 @@ if selected_player_name and season_input:
             
             chart_df = chart_df.sort_values('SEASON_ID', ascending=True)
             
+            # [修正] 計算場均數據：API 回傳的是總數據 (Totals)，需除以 GP (出場數)
             chart_df['賽季'] = chart_df['SEASON_ID']
-            chart_df['得分'] = chart_df['PTS']
-            chart_df['籃板'] = chart_df['REB']
-            chart_df['助攻'] = chart_df['AST']
+            chart_df['得分'] = round(chart_df['PTS'] / chart_df['GP'], 1)
+            chart_df['籃板'] = round(chart_df['REB'] / chart_df['GP'], 1)
+            chart_df['助攻'] = round(chart_df['AST'] / chart_df['GP'], 1)
             chart_df['投籃命中率%'] = chart_df['FG_PCT'] * 100
             chart_df['三分命中率%'] = chart_df['FG3_PCT'] * 100
             chart_df['罰球命中率%'] = chart_df['FT_PCT'] * 100
