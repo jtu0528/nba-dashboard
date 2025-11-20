@@ -66,6 +66,9 @@ def get_precise_positions(generic_position, translate_to_zh=False):
         'Guard': ['PG', 'SG'], 'Forward': ['SF', 'PF'], 'Center': ['C'],
         'G-F': ['PG', 'SG', 'SF'], 'F-G': ['SG', 'SF', 'PF'], 'F-C': ['SF', 'PF', 'C'],
         'C-F': ['PF', 'C', 'SF'], 'G': ['PG', 'SG'], 'F': ['SF', 'PF'], 'C': ['C'],
+        # 補上完整的複合位置全稱
+        'Guard-Forward': ['PG', 'SG', 'SF'], 'Forward-Guard': ['SG', 'SF', 'PF'],
+        'Forward-Center': ['SF', 'PF', 'C'], 'Center-Forward': ['PF', 'C', 'SF']
     }
     positions = position_map.get(generic_position)
     
@@ -83,7 +86,10 @@ def get_precise_positions(generic_position, translate_to_zh=False):
         zh_generic_map = {
             'Forward': '前鋒', 'Guard': '後衛', 'Center': '中鋒',
             'G-F': '後衛-前鋒', 'F-G': '前鋒-後衛', 'F-C': '前鋒-中鋒',
-            'C-F': '中鋒-前鋒', 'G': '後衛', 'F': '前鋒', 'C': '中鋒'
+            'C-F': '中鋒-前鋒', 'G': '後衛', 'F': '前鋒', 'C': '中鋒',
+            # 補上完整的複合位置全稱
+            'Guard-Forward': '後衛-前鋒', 'Forward-Guard': '前鋒-後衛',
+            'Forward-Center': '前鋒-中鋒', 'Center-Forward': '中鋒-前鋒'
         }
         return zh_generic_map.get(generic_position, generic_position)
         
